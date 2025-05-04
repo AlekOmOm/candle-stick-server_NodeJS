@@ -1,0 +1,205 @@
+# Binance Candlestick Data Server using PostgreSQL/TimescaleDB
+
+## License
+MIT License
+Copyright (c) 2025 Aleksander Hvid Ellegård
+
+## Project Overview
+A WebSocket-based server for ingesting Binance candlestick data into PostgreSQL/TimescaleDB, with implementation divided into MVP and Phase 2.
+
+## Guiding Principles
+- **MVP**: Focus on core functionality – getting live data correctly parsed and stored with minimal complexity.
+- **Phase 2**: Harden the MVP for reliable unattended operation and add essential features like historical data backfilling.
+
+## Functional Requirements
+
+### MVP Requirements: Core Data Ingestion
+**Goal**: Prove the basic concept works: connect, receive, parse, and store live, closed candlestick data for a single pre-configured market.
+
+#### Connectivity
+- [R1.1] The Node.js application MUST connect to the Binance WebSocket stream endpoint.
+- [R1.2] The application MUST be configurable (e.g., via hardcoded values or a simple config file/object) for one specific symbol and interval (e.g., btcusdt, 1m).
+- [R1.3] The application MUST subscribe to the corresponding kline WebSocket stream (e.g., btcusdt@kline_1m).
+
+#### Data Handling & Parsing
+- [R2.1] The application MUST receive incoming WebSocket messages.
+- [R2.2] The application MUST parse the received JSON message payload.
+- [R2.3] The application MUST identify messages corresponding to the kline event (e: "kline").
+- [R2.4] The application MUST extract key fields from the kline data (k object): start time (t), open (o), high (h), low (l), close (c), volume (v), close time (T), symbol (s), interval (i), and the "is closed" flag (x).
+- [R2.5] The application MUST correctly identify when a candlestick is marked as closed (k.x === true).
+
+#### Database Storage (PostgreSQL/TimescaleDB)
+- [R3.1] The application MUST connect to a pre-configured PostgreSQL database where the TimescaleDB extension is enabled.
+- [R3.2] A database table (e.g., candlesticks) MUST exist with the appropriate schema (columns for time, symbol, interval, o, h, l, c, v, close_time, etc., with correct data types like TIMESTAMPTZ and NUMERIC). The time, symbol, interval should form a primary key or unique constraint.
+- [R3.3] The table MUST be configured as a TimescaleDB hypertable, partitioned by the start time.
+- [R3.4] The application MUST only attempt to store candlesticks that are marked as closed (k.x === true).
+- [R3.5] The application MUST insert the extracted and parsed closed candlestick data into the candlesticks table.
+- [R3.6] The application MUST handle basic database connection/query errors by logging them to the console.
+
+#### Application & Logging
+- [R4.1] The application MUST be a runnable Node.js script.
+- [R4.2] The application MUST log basic status information to the console (e.g., "Connecting to WebSocket...", "WebSocket connected", "Received message for SYMBOL", "Saving closed candle for SYMBOL at TIME", "Database error: [error message]").
+
+#### Out of Scope for MVP
+- Handling multiple symbols/intervals simultaneously.
+- Automatic WebSocket reconnection on errors/disconnects.
+- Advanced error handling (retries, dead-letter queues).
+- Fetching/backfilling historical data.
+- Configuration via environment variables or complex config files.
+- API endpoints for querying data.
+- Performance optimizations (e.g., batch database writes).
+- Graceful shutdown handling.
+- Monitoring and alerting.
+- Updating candles before they close (no upsert logic needed yet).
+
+### Phase 2 Requirements: Stability, Resilience & Backfilling
+**Goal**: Make the service robust enough for continuous operation, handle failures gracefully, support multiple markets, and add the ability to fetch historical data.
+
+#### Enhanced Stability & Resilience
+- [R5.1] **Auto-Reconnect**: The application MUST automatically attempt to reconnect to the Binance WebSocket stream if the connection drops or encounters an error. Implement an exponential backoff strategy for reconnection attempts.
+- [R5.2] **Configuration**:
+  - [R5.2.1] All configuration parameters (symbols, intervals, DB credentials, reconnect settings) MUST be externalized (e.g., using .env files or a dedicated configuration file).
+  - [R5.2.2] The application MUST support configuring and connecting to multiple symbol/interval streams concurrently over a single WebSocket connection (or multiple connections if necessary based on Binance limits).
+- [R5.3] **Improved Error Handling**:
+  - [R5.3.1] Implement more detailed and structured logging for errors (WebSocket errors, parsing errors, database errors).
+  - [R5.3.2] Handle potential data parsing errors gracefully (log the problematic message and continue).
+  - [R5.3.3] Handle potential database errors (e.g., constraint violations if duplicate data is received) – log the error, potentially use INSERT ... ON CONFLICT DO NOTHING to avoid crashes on duplicates. Consider retries for transient DB connection issues.
+- [R5.4] **Graceful Shutdown**: The application MUST handle process termination signals (SIGINT, SIGTERM) to cleanly close WebSocket connections and database connections/pools.
+- [R5.5] **Monitoring Hooks**: Implement basic health indicators (e.g., log connection status periodically, track message/insertion rates, log error counts) to facilitate monitoring. (Could be simple logging or a basic /health endpoint if using Express).
+
+#### Database Enhancements
+- [R6.1] **Indexing**: Ensure appropriate database indexes exist on the candlesticks hypertable to support efficient querying (e.g., composite index on (symbol, interval, time DESC)).
+- [R6.2] **Optimization** (Optional but Recommended): If handling many streams, investigate and potentially implement batching of database inserts to reduce load and improve throughput.
+- [R6.3] **Data Integrity**: Reinforce duplicate prevention using INSERT ... ON CONFLICT DO NOTHING on the primary key (time, symbol, interval).
+
+#### Historical Data Backfilling
+- [R7.1] **New Component/Mode**: Implement a separate script, or a distinct mode within the main application, dedicated to backfilling historical data.
+- [R7.2] **Binance REST API**: Utilize the official Binance REST API endpoint (/api/v3/klines) to fetch historical candlestick data.
+- [R7.3] **Parameters**: The backfill mechanism MUST accept parameters for symbol, interval, startTime, and endTime.
+- [R7.4] **Data Handling**:
+  - [R7.4.1] Paginate through historical data respecting Binance API limits per request (e.g., 1000 candles).
+  - [R7.4.2] Parse the historical data response correctly.
+  - [R7.4.3] Insert the historical data into the same candlesticks PostgreSQL/TimescaleDB table.
+- [R7.5] **Rate Limiting**: The backfill mechanism MUST implement delays between consecutive API requests to respect Binance's REST API rate limits and IP weight limits.
+- [R7.6] **Idempotency**: The backfill process SHOULD be idempotent, meaning running it multiple times for the same period should not insert duplicate data (use INSERT ... ON CONFLICT DO NOTHING). It should handle potential overlaps with live data gracefully.
+- [R7.7] **Logging**: Provide clear logging during the backfill process (e.g., "Backfilling SYMBOL/INTERVAL from START to END", "Fetched X candles", "Rate limit delay...", "Backfill complete").
+
+## Non-Functional Requirements (NFRs)
+These define the quality attributes and operational characteristics of the system, complementing the functional requirements.
+
+### Reliability & Availability
+- **Uptime**: The live data ingestion service should target high availability (e.g., 99.9% uptime), excluding scheduled maintenance.
+- **Fault Tolerance**: The service must automatically recover from temporary network interruptions (to Binance WebSocket or Database) as defined in Phase 2 [R5.1].
+- **Data Loss**: Data loss during ingestion should be minimized. The system should aim for zero data loss for closed candles under normal operating conditions and recoverable failures. Unrecoverable errors should be logged clearly.
+
+### Performance
+- **Latency**: The end-to-end latency (from Binance publishing a closed candle on WebSocket to it being committed in the database) should ideally be under 2 seconds during periods of average market volatility and system load.
+- **Throughput**: The system must process the incoming WebSocket message volume for all configured streams without significant queuing or lag. It should comfortably handle the combined message rate (consider 1 message/sec per stream for ongoing candle updates + 1 message per interval for closed candles).
+- **Database Ingestion Rate**: The database (PostgreSQL/TimescaleDB) must sustain the required write throughput without performance degradation.
+
+### Scalability
+- **Stream Scalability**: The application architecture should allow for easy addition of new symbols/intervals via configuration [R5.2.2] without requiring code changes. It should support scaling to monitor a moderate number of streams (e.g., 50-100+) on a single Node.js instance with adequate resources.
+- **Data Volume**: The database solution (TimescaleDB) must efficiently handle data growth over months/years, supporting partitioning and data retention policies if implemented later.
+
+### Maintainability
+- **Modularity**: Code should be organized into logical modules (WebSocket handling, parsing, database interaction, backfilling).
+- **Readability**: Code should be well-commented and follow standard Node.js/JavaScript coding conventions.
+- **Configuration**: All environment-specific settings and operational parameters must be externalized [R5.2.1].
+- **Logging**: Logging should be structured, informative, and sufficient for debugging operational issues [R4.2, R5.3.1, R7.7].
+
+### Security
+- **Credentials**: Database credentials and any potential future API keys must not be hardcoded; they must be managed securely via environment variables or a secrets management system [R5.2.1].
+- **Dependencies**: Keep Node.js packages updated to patch known security vulnerabilities.
+- **Network**: Database connections should be secured appropriately (e.g., SSL/TLS, firewall rules) depending on the deployment environment.
+
+### Data Integrity
+- **Accuracy**: Data types must be preserved accurately during parsing and storage (e.g., numeric precision for prices/volumes).
+- **Uniqueness**: The system must prevent the insertion of duplicate candlestick records for the same symbol, interval, and start time [R3.2, R6.3, R7.6].
+- **Consistency**: Rely on PostgreSQL's ACID properties for reliable transaction commits.
+
+### Operability
+- **Deployment**: The application should be straightforward to deploy (e.g., potentially using Docker later).
+- **Monitoring**: The system should provide sufficient logs [R4.2, R5.3.1] and potentially basic health checks [R5.5] to monitor its status and troubleshoot problems.
+- **Backfilling Control**: The backfilling process [R7.x] must be executable on demand and provide clear feedback on its progress and completion.
+
+## Technology Stack
+Based on previous decisions and common practices:
+- **Language/Runtime**: Node.js (LTS version, e.g., v18 or v20 as of May 2025)
+- **WebSocket Client**: ws
+- **Database**: PostgreSQL (e.g., v15, v16)
+- **Database Extension**: TimescaleDB (e.g., v2.x compatible with chosen PostgreSQL version)
+- **PostgreSQL Driver**: pg (node-postgres)
+- **Configuration**: dotenv (for loading .env files)
+- **HTTP Client (for Backfill)**: axios or built-in Node.js Workspace
+- **Framework (Optional)**: Express.js (useful for structure, health checks, or future API)
+- **Containerization (Optional)**: Docker
+
+## Architecture Diagram (Domain Model using Mermaid)
+```mermaid
+graph TD
+    subgraph "External Systems"
+        direction LR
+        B_WS[<img src='https://img.icons8.com/color/48/binance.png' width='20' height='20' style='vertical-align: middle'/> Binance WebSocket API]
+        B_REST[<img src='https://img.icons8.com/color/48/binance.png' width='20' height='20' style='vertical-align: middle'/> Binance REST API]
+    end
+
+    subgraph "Candlestick Ingestor (Node.js Application)"
+        direction TB
+        id6{Main Application Logic}
+        id5[Configuration Loader (.env)] -- Reads --> id6
+        id1[WebSocket Client (ws)] -- Managed by --> id6
+        id2[Data Parser] -- Used by --> id6 & id4
+        id3[Database Client (pg + TimescaleDB)] -- Used by --> id6 & id4
+        id4[Backfill Module (Phase 2)] -- Triggered by/Managed by --> id6
+
+        id1 -- Raw JSON --> id2
+        id2 -- Parsed Candle Data --> id6
+        id2 -- Parsed Historical Data --> id4
+        id6 -- Stores Live Candle --> id3
+        id4 -- Stores Historical Candle --> id3
+    end
+
+    subgraph "Data Storage"
+       direction TB
+       DB[(<img src='https://img.icons8.com/color/48/postgreesql.png' width='20' height='20' style='vertical-align: middle'/> PostgreSQL DB)]
+       TSDB_Ext{{TimescaleDB Extension}}
+       Table[/candlesticks (Hypertable)/]
+
+       DB -- Has --> TSDB_Ext
+       DB -- Contains --> Table
+    end
+
+    subgraph "Configuration"
+       Config[/'.env' file/] --> id5
+    end
+
+    %% Data Flows
+    B_WS -- Streams Live Kline JSON --> id1
+    B_REST -- Provides Historical Kline JSON --> id4
+    id3 -- INSERT/UPSERT --> Table
+
+    %% Styling (Optional)
+    style B_WS fill:#f9f,stroke:#333,stroke-width:1px
+    style B_REST fill:#f9f,stroke:#333,stroke-width:1px
+    style DB fill:#d6f5d6,stroke:#333,stroke-width:2px
+    style Table fill:#e6ffe6,stroke:#333
+```
+
+### Explanation of the Diagram
+- **External Systems**: Shows the Binance APIs (WebSocket for live data, REST for historical) as the data sources.
+- **Configuration**: The .env file provides configuration loaded by the Configuration Loader.
+- **Candlestick Ingestor (Node.js Application)**:
+  - The Main Application Logic orchestrates the process.
+  - WebSocket Client connects to Binance WS and receives live data.
+  - Data Parser standardizes both live and historical JSON data into a usable format.
+  - Database Client handles interaction with PostgreSQL/TimescaleDB using the pg driver.
+  - Backfill Module (Phase 2) uses the REST API, parser, and DB client to fetch and store historical data.
+- **Data Storage**: Represents the PostgreSQL database, explicitly mentioning the TimescaleDB extension and the candlesticks hypertable where data is stored.
+- **Data Flows**: Arrows indicate the primary direction of data movement: from Binance APIs, through parsing, and into the database via the appropriate module (live or backfill).
+
+## Testing Requirements
+Both MVP and Phase 2 require testing:
+- Unit tests for parsing logic
+- Integration tests for WebSocket connection and DB interaction
+- End-to-end tests simulating real data flow
+- Backfilling needs careful testing against known historical data
