@@ -1,0 +1,51 @@
+
+
+graph TD
+
+    subgraph "External Systems"
+        direction LR
+        B_WS[Binance WebSocket API]
+        B_REST[Binance REST API]
+    end
+
+    subgraph "Candlestick Ingestor (Node.js Application)"
+        direction TB
+        id6{Main Application Logic}
+        id5["Configuration Loader (.env)"] -- Reads --> id6
+        id1["WebSocket Client (ws)"] -- Managed by --> id6
+        id2["Data Parser"] -- Used by --> id6 & id4
+        id3["Database Client (pg + TimescaleDB)"] -- Used by --> id6 & id4
+        id4["Backfill Module (Phase 2)"] -- Triggered by/Managed by --> id6
+
+        id1 -- Raw JSON --> id2
+        id2 -- Parsed Candle Data --> id6
+        id2 -- Parsed Historical Data --> id4
+        id6 -- Stores Live Candle --> id3
+        id4 -- Stores Historical Candle --> id3
+    end
+
+    subgraph "Data Storage"
+       direction TB
+       DB[(PostgreSQL DB)]
+       TSDB_Ext{{TimescaleDB Extension}}
+       Table["/candlesticks (Hypertable)/"]
+
+       DB -- Has --> TSDB_Ext
+       DB -- Contains --> Table
+    end
+
+    subgraph "Configuration"
+       Config[/'.env' file/] --> id5
+    end
+
+    %% Data Flows
+    B_WS -- Streams Live Kline JSON --> id1
+    B_REST -- Provides Historical Kline JSON --> id4
+    id3 -- INSERT/UPSERT --> Table
+
+    %% Styling (Optional)
+    style B_WS fill:#ccf,stroke:#333,stroke-width:1px
+    style B_REST fill:#ccf,stroke:#333,stroke-width:1px
+    style DB fill:#d6f5d6,stroke:#333,stroke-width:2px
+    style Table fill:#e6ffe6,stroke:#333
+

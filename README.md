@@ -37,7 +37,7 @@ This project provides a Node.js application that connects to the Binance WebSock
 
 ## Documentation
 
-For detailed requirements and architecture, see the [PRD.txt](PRD.txt) file.
+For detailed requirements and architecture, see the [PRD.txt](./scripts/PRD.txt) file.
 
 ## License
 
