@@ -2,8 +2,17 @@
   "name": "candle-stick-server_nodejs",
   "version": "1.0.0",
   "description": "A WebSocket-based server for ingesting Binance candlestick data into PostgreSQL/TimescaleDB.",
-  "main": "index.js",
+  "main": "server.js",
   "scripts": {
+    "start": "node server.js",
+    "dev": "npm run resetDB && nodemon server.js",
+    "dev:debug": "npm run dev -- --log-level=debug",
+    "dev:info": "npm run dev -- --log-level=info",
+    "dev:warn": "npm run dev -- --log-level=warn",
+    "dev:error": "npm run dev -- --log-level=error",
+    "initDB": "node scripts/initDB.js",
+    "resetDB": "node scripts/resetDB.js",
+    "seedDB": "node scripts/seedDB.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
@@ -13,7 +22,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "bugs": {
     "url": "https://github.com/AlekOmOm/candle-stick-server_NodeJS/issues"
   },
@@ -23,5 +32,12 @@
     "express": "^5.1.0",
     "pg": "^8.15.6",
     "ws": "^8.18.2"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.1",
+    "eslint-config-prettier": "^10.1.2",
+    "prettier": "^3.5.3",
+    "prettier-eslint": "^16.4.1",
+    "tslib": "^2.8.1"
   }
 }
