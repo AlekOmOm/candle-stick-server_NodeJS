@@ -10,9 +10,9 @@
     "dev:info": "npm run dev -- --log-level=info",
     "dev:warn": "npm run dev -- --log-level=warn",
     "dev:error": "npm run dev -- --log-level=error",
-    "initDB": "node scripts/initDB.js",
-    "resetDB": "node scripts/resetDB.js",
-    "seedDB": "node scripts/seedDB.js",
+    "db-init": "nodemon scripts/db-setup.js",
+    "db-reset": "node scripts/resetDB.js",
+    "db-seed": "node scripts/seedDB.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {

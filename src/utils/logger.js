@@ -25,7 +25,7 @@
  * debug: all messages will be logged
  */
 
-import utilConfig from './config';
+import utilConfig from './config.js';
 const LOG_LEVELS = ['error', 'warn', 'info', 'debug'];
 const minIndex = LOG_LEVELS.indexOf(utilConfig.LOG_LEVEL);
 
